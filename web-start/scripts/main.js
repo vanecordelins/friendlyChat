@@ -55,58 +55,120 @@ function FriendlyChat() {
 
 // Sets up shortcuts to Firebase features and initiate firebase auth.
 FriendlyChat.prototype.initFirebase = function() {
-  // TODO 1: Initialize Firebase.
+  // Shortcuts to Firebase SDK features.
+  this.auth = firebase.auth();
+  this.database = firebase.database();
+  this.storage = firebase.storage();
+  this.messaging = firebase.messaging();
+
+  // Initiates Firebase auth and listen to auth state changes.
+  this.auth.onAuthStateChanged(this.authStateObserver.bind(this));
 };
 
 // Signs-in Friendly Chat.
 FriendlyChat.prototype.signIn = function() {
-  // TODO 2: Sign in Firebase with credential from the Google user.
+  // Sign in Firebase using popup auth and Google as the identity provider.
+  var provider = new firebase.auth.GoogleAuthProvider();
+  this.auth.signInWithPopup(provider);
 };
 
 // Signs-out of Friendly Chat.
 FriendlyChat.prototype.signOut = function() {
-  // TODO 3: Sign out of Firebase.
+  // Sign out of Firebase.
+  this.auth.signOut();
 };
 
 // Returns the signed-in user's profile Pic URL.
 FriendlyChat.prototype.getProfilePicUrl = function() {
-  // TODO 4: Return the user's profile pic URL.
+  return this.auth.currentUser.photoURL || '/images/profile_placeholder.png';
 }
 
 // Returns the signed-in user's display name.
 FriendlyChat.prototype.getUserName = function() {
-  // TODO 5: Return the user's display name.
+  return this.auth.currentUser.displayName;
 }
 
 // Returns true if a user is signed-in.
 FriendlyChat.prototype.isUserSignedIn = function() {
-  // TODO 6: Return true if a user is signed-in.
+  return !!this.auth.currentUser;
 }
 
 // Loads chat messages history and listens for upcoming ones.
 FriendlyChat.prototype.loadMessages = function() {
-  // TODO 7: Load and listens for new messages.
+  // Loads the last 12 messages and listen for new ones.
+  var setMessage = function(snap) {
+    var data = snap.val();
+    this.displayMessage(snap.key, data.name, data.text, data.profilePicUrl, data.imageUrl);
+  }.bind(this);
+
+  this.database.ref('/messages/').limitToLast(12).on('child_added', setMessage);
+  this.database.ref('/messages/').limitToLast(12).on('child_changed', setMessage);
 };
 
 // Saves a new message on the Firebase DB.
 FriendlyChat.prototype.saveMessage = function(messageText) {
-  // TODO 8: Push a new message to Firebase.
+  // Add a new message entry to the Firebase Database.
+  return this.database.ref('/messages/').push({
+    name: this.getUserName(),
+    text: messageText,
+    profilePicUrl: this.getProfilePicUrl()
+  }).catch(function(error) {
+    console.error('Error writing new message to Firebase Database', error);
+  });
 };
 
-// Saves a new message containing an image URL in Firebase.
+// Saves a new message containing an image URI in Firebase.
 // This first saves the image in Firebase storage.
 FriendlyChat.prototype.saveImageMessage = function(file) {
-  // TODO 9: Posts a new image as a message.
+  // 1 - We add a message with a loading icon that will get updated with the shared image.
+  this.database.ref('/messages/').push({
+    name: this.getUserName(),
+    imageUrl: FriendlyChat.LOADING_IMAGE_URL,
+    profilePicUrl: this.getProfilePicUrl()
+  }).then(function(messageRef) {
+    // 2 - Upload the image to Cloud Storage.
+    var filePath = this.auth.currentUser.uid + '/' + messageRef.key + '/' + file.name;
+    return this.storage.ref(filePath).put(file).then(function(fileSnapshot) {
+      // 3 - Generate a public URL for the file.
+      return fileSnapshot.ref.getDownloadURL().then((url) => {
+        // 4 - Update the chat message placeholder with the image's URL.
+        return messageRef.update({
+          imageUrl: url,
+          storageUri: fileSnapshot.metadata.fullPath
+        });
+      });
+    }.bind(this));
+  }.bind(this)).catch(function(error) {
+    console.error('There was an error uploading a file to Cloud Storage:', error);
+  });
 };
 
 // Saves the messaging device token to the datastore.
 FriendlyChat.prototype.saveMessagingDeviceToken = function() {
-  // TODO 10: Save the device token in the realtime datastore
+  this.messaging.getToken().then(function(currentToken) {
+    if (currentToken) {
+      console.log('Got FCM device token:', currentToken);
+      // Saving the Device Token to the datastore.
+      this.database.ref('/fcmTokens').child(currentToken)
+          .set(this.auth.currentUser.uid);
+    } else {
+      // Need to request permissions to show notifications.
+      this.requestNotificationsPermissions();
+    }
+  }.bind(this)).catch(function(error){
+    console.error('Unable to get messaging token.', error);
+  });
 };
 
 // Requests permissions to show notifications.
 FriendlyChat.prototype.requestNotificationsPermissions = function() {
-  // TODO 11: Request permissions to send notifications.
+  console.log('Requesting notifications permission...');
+  this.messaging.requestPermission().then(function() {
+    // Notification permission granted.
+    this.saveMessagingDeviceToken();
+  }.bind(this)).catch(function(error) {
+    console.error('Unable to get permission to notify.', error);
+  });
 };
 
 // Triggered when a file is selected via the media picker.
