@@ -1,7 +1,7 @@
 # Projeto de Análise e Projeto de Sistemas - UFRPE/UAG
 
-Aluna: Vanessa Lins
-Turma: 2018.1
+- Aluna: Vanessa Lins
+- Turma: 2018.1
 
 # Firebase Codelab: FriendlyChat
 
